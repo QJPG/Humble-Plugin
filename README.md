@@ -43,3 +43,16 @@ func revoke_authority(peer : int) -> void:
 ```
 
 ### If the rooms are in limbo state (without any players in it), it will have a timer of a few seconds and will close itself.
+A room can be configured with response values.
+```gdscript
+HumbleNetRemoteEventService.create_room(false, 5, {
+		HumbleNetManager.RoomState.RoomConfigs.HELLO: "This is a private hello data when a client joins.", #send to new peer
+		HumbleNetManager.RoomState.RoomConfigs.BYE: "This is a public 'Adios' data when player exited.",  #send to all in a room
+		HumbleNetManager.RoomState.RoomConfigs.JOINNED: "This is a public hello data when player joinned." #send to all in a room
+	})
+```
+It is also possible to change these settings even after the room has been created.
+```gdscript
+HumbleNetRemoteEventService.set_room_config(HumbleNetManager.RoomState.RoomConfigs.BYE, "A player just left the game!")
+```
+
