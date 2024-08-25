@@ -41,3 +41,5 @@ func revoke_authority(peer : int) -> void:
 
 
 ```
+
+### If the rooms are in limbo state (without any players in it), it will have a timer of a few seconds and will close itself.
