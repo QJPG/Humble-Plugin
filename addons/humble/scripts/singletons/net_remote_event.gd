@@ -2,6 +2,13 @@ extends Node
 
 class_name HumbleNetRemoteEvent
 
+enum JoinErrors {
+	IS_IN_OTHER_ROOM,
+	IS_FULL,
+	REFUSED,
+	NOT_FOUND,
+}
+
 var room_created_callback : Callable
 var room_event_callback : Callable
 var room_entered_callback : Callable
@@ -9,6 +16,7 @@ var room_exited_callback : Callable
 var room_player_entered_callback : Callable
 var room_player_exited_callback : Callable
 var room_player_authority_changed_callback : Callable
+var room_joinned_room_error_callback : Callable
 
 func _enter_tree() -> void:
 	get_tree().set_multiplayer(HumbleMultiplayerExt.new())
@@ -45,6 +53,9 @@ func add_authority(peer : int) -> void:
 func revoke_authority(peer : int) -> void:
 	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_set_player_authority", [peer, false])
 
+func set_room_config(config : HumbleNetManager.RoomState.RoomConfigs, value : Variant) -> void:
+	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_set_room_config", [config, value])
+
 @rpc("authority", "call_remote", "reliable")
 func _rpc_room_created(code : String) -> void:
 	if room_created_callback:
@@ -79,3 +90,8 @@ func _rpc_room_player_exited(peer : int, data : Variant = null) -> void:
 func _rpc_room_player_authority_changed(has : bool) -> void:
 	if room_player_authority_changed_callback:
 		room_player_authority_changed_callback.call(has)
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_join_room_error(reason : JoinErrors) -> void:
+	if room_joinned_room_error_callback:
+		room_joinned_room_error_callback.call(reason)

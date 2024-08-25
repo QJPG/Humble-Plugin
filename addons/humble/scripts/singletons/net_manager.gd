@@ -3,6 +3,12 @@ extends Node
 class_name HumbleNetManager
 
 class RoomState extends RefCounted:
+	enum RoomConfigs {
+		HELLO,		#SEND TO NEW PEER
+		BYE,		#SEND TO ALL PEERS
+		JOINNED,	#SEND RO ALL PEERS
+	}
+	
 	var room_code : String
 	var room_owner : int
 	var room_timer : SceneTreeTimer
@@ -11,6 +17,7 @@ class RoomState extends RefCounted:
 	var room_players : PackedInt32Array
 	var room_max_players : int
 	var room_player_authorities : PackedInt32Array
+	var room_closed : bool
 	
 	func generate_unique_room_code(length := 4) -> void:
 		var _chars := "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -43,10 +50,7 @@ class RoomState extends RefCounted:
 						peer, HumbleNetRemoteEventService, "_rpc_room_player_authority_changed", [false])
 				#region
 	
-	func add_player(peer : int, data : Variant = null) -> void:
-		if room_players.size() > room_max_players:
-			return
-		
+	func add_player(peer : int) -> void:
 		var find_proxy := HumbleNetAuthService.get_proxy_auth(peer)
 		
 		if find_proxy:
@@ -56,7 +60,7 @@ class RoomState extends RefCounted:
 				#region network
 				#NOTIFY PEER
 				HumbleNetManagerService.get_multiplayer_ext().rpc(
-					peer, HumbleNetRemoteEventService, "_rpc_room_entered", [data])
+					peer, HumbleNetRemoteEventService, "_rpc_room_entered", [room_config.get_or_add(RoomConfigs.HELLO, null)])
 				
 				#NOTIFY ALL PEERS
 				for i in room_players.size():
@@ -67,14 +71,14 @@ class RoomState extends RefCounted:
 					
 					HumbleNetManagerService.get_multiplayer_ext().rpc(
 						peer_id, HumbleNetRemoteEventService, "_rpc_room_player_entered", [
-								peer, data
+								peer, room_config.get_or_add(RoomConfigs.JOINNED, null)
 							])
 				#endregion
 				
 				find_proxy.proxy_is_in_room = true
 				find_proxy.proxy_in_room_code = room_code
 	
-	func remove_player(peer : int, data : Variant = null, notify_peer : bool = true) -> void:
+	func remove_player(peer : int, reason : Variant = null, notify_peer : bool = true) -> void:
 		var find_proxy := HumbleNetAuthService.get_proxy_auth(peer)
 		
 		if find_proxy:
@@ -87,7 +91,7 @@ class RoomState extends RefCounted:
 					#NOTIFY PEER
 					if notify_peer:
 						HumbleNetManagerService.get_multiplayer_ext().rpc(
-							peer, HumbleNetRemoteEventService, "_rpc_room_exited", [data])
+							peer, HumbleNetRemoteEventService, "_rpc_room_exited", [reason])
 					else:
 						pass
 					
@@ -99,7 +103,7 @@ class RoomState extends RefCounted:
 							continue
 						
 						HumbleNetManagerService.get_multiplayer_ext().rpc(
-							peer_id, HumbleNetRemoteEventService, "_rpc_room_player_exited", [peer, data])
+							peer_id, HumbleNetRemoteEventService, "_rpc_room_player_exited", [peer, reason])
 					#endregion
 					
 					find_proxy.proxy_is_in_room = false
@@ -110,7 +114,7 @@ class RoomState extends RefCounted:
 			if not notify_owner and room_players[i] == room_owner:
 				continue
 			
-			remove_player(room_players[i], null)
+			remove_player(room_players[i], reason)
 	
 	func send_event(data : Variant, targets := PackedInt32Array([])) -> void:
 		if targets.size() > 0:
@@ -212,6 +216,16 @@ func _rpc_create_room(is_private : bool, max_players : int = 10, config := {}) -
 	if not multiplayer.is_server():
 		return
 	
+	if max_players < 1:
+		return
+	
+	if config is not Dictionary:
+		return
+	
+	for key in config.keys():
+		if not RoomState.RoomConfigs.values().has(key):
+			return
+	
 	var client_owner := multiplayer.get_remote_sender_id()
 	var find_proxy := HumbleNetAuthService.get_proxy_auth(client_owner)
 	
@@ -267,18 +281,29 @@ func _rpc_join_room(code : String) -> void:
 	var joinned_client := multiplayer.get_remote_sender_id()
 	var find_proxy := HumbleNetAuthService.get_proxy_auth(joinned_client)
 	
+	var connected_success := false
+	var join_error : HumbleNetRemoteEvent.JoinErrors
+	
 	if find_proxy:
 		if find_proxy.proxy_is_in_room == false:
 			var find_room := get_room(code)
 			
 			if find_room:
-				find_room.add_player(joinned_client, null)
+				if find_room.room_closed == false:
+					if find_room.room_players.size() >= find_room.room_max_players:
+						join_error = HumbleNetRemoteEvent.JoinErrors.IS_FULL
+					else:
+						find_room.add_player(joinned_client)
+						connected_success = true
+				else:
+					join_error = HumbleNetRemoteEvent.JoinErrors.REFUSED
 			else:
-				return
+				join_error = HumbleNetRemoteEvent.JoinErrors.NOT_FOUND
 		else:
-			return
-	else:
-		return
+			join_error = HumbleNetRemoteEvent.JoinErrors.IS_IN_OTHER_ROOM
+	
+		if connected_success == false:
+			multiplayer.rpc(joinned_client, HumbleNetRemoteEventService, "_rpc_join_room_error", [join_error])
 
 @rpc("any_peer", "call_remote", "reliable")
 func _rpc_exit_room() -> void:
@@ -293,7 +318,7 @@ func _rpc_exit_room() -> void:
 			var find_room := get_room(find_proxy.proxy_in_room_code)
 			
 			if find_room:
-				find_room.remove_player(exited_client, null)
+				find_room.remove_player(exited_client, find_room.room_config.get_or_add(RoomState.RoomConfigs.BYE, null))
 			else:
 				return
 		else:
@@ -303,7 +328,7 @@ func _rpc_exit_room() -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _rpc_kick_player(peer : int, data : Variant = null) -> void:
+func _rpc_kick_player(peer : int, reason : Variant = null) -> void:
 	if not multiplayer.is_server():
 		return
 	
@@ -316,7 +341,7 @@ func _rpc_kick_player(peer : int, data : Variant = null) -> void:
 			
 			if find_room:
 				if find_room.room_owner == client_owner:
-					find_room.remove_player(peer, data)
+					find_room.remove_player(peer, reason)
 				else:
 					return
 			else:
@@ -368,3 +393,20 @@ func _rpc_set_player_authority(peer : int, has : bool) -> void:
 						find_room.add_authority(peer)
 					else:
 						find_room.remove_authority(peer)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_set_room_config(config : RoomState.RoomConfigs, value : Variant) -> void:
+	if not multiplayer.is_server():
+		return
+	
+	var client_owner := multiplayer.get_remote_sender_id()
+	var find_proxy := HumbleNetAuthService.get_proxy_auth(client_owner)
+	
+	if find_proxy:
+		if find_proxy.proxy_is_in_room:
+			var find_room := get_room(find_proxy.proxy_in_room_code)
+			
+			if find_room:
+				if find_room.room_owner == client_owner:
+					if config is RoomState.RoomConfigs:
+						find_room.room_config[config] = value
