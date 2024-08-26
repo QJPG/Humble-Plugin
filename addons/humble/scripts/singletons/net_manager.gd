@@ -2,6 +2,11 @@ extends Node
 
 class_name HumbleNetManager
 
+enum DefaultReasons {
+	OCORRED_ERROR,
+	ROOM_OWNER_LEFT,
+}
+
 class RoomState extends RefCounted:
 	enum RoomConfigs {
 		HELLO,		#SEND TO NEW PEER
@@ -110,11 +115,18 @@ class RoomState extends RefCounted:
 					find_proxy.proxy_in_room_code = String()
 	
 	func remove_players(reason : Variant = null, notify_owner : bool = true) -> void:
-		for i in room_players.size():
-			if not notify_owner and room_players[i] == room_owner:
-				continue
+		var _index := 0
+		var _length := room_players.size()
+		
+		while _index < _length:
+			var id := room_players[0]
+			var _notify := true
 			
-			remove_player(room_players[i], reason)
+			if id == room_owner:
+				_notify = notify_owner
+			
+			remove_player(id, reason, _notify)
+			_index += 1
 	
 	func send_event(data : Variant, targets := PackedInt32Array([])) -> void:
 		if targets.size() > 0:
@@ -183,21 +195,34 @@ func _exit_tree() -> void:
 var _poll_delta := 0.0
 
 func _process(delta: float) -> void:
+	if not get_multiplayer_ext():
+		return
+	
 	if _poll_delta < 1000.0:
-		for i in rooms.size():
-			if rooms[i].room_players.size() < 1:
-				if rooms[i].room_timer == null:
-					rooms[i].room_timer = get_tree().create_timer(5.0)
-					rooms[i].room_timer.timeout.connect(
+		var _index := 0
+		var _rooms_count := rooms.size()
+		
+		while _index < _rooms_count:
+			var room := rooms[0]
+			
+			if room.room_players.size() < 1:
+				if room.room_timer == null:
+					if get_multiplayer_ext().is_debug_enabled():
+						printerr("Start room timeout to destroy.")
+					
+					room.room_timer = get_tree().create_timer(5.0)
+					room.room_timer.timeout.connect(
 						func() -> void:
-							if rooms[i].room_players.size() < 1:
-								var code := rooms[i].room_code
-								rooms.erase(rooms[i])
+							if room.room_players.size() < 1:
+								var code := room.room_code
+								rooms.erase(room)
 								
-								printerr("Room (%s) was erased by limbo state." % code)
+								if get_multiplayer_ext().is_debug_enabled():
+									printerr("Room (%s) was erased by limbo state." % code)
 							else:
-								rooms[i].room_timer = null
+								room.room_timer = null
 					)
+			_index += 1
 		
 		_poll_delta += 5000.0
 	else:
@@ -318,7 +343,10 @@ func _rpc_exit_room() -> void:
 			var find_room := get_room(find_proxy.proxy_in_room_code)
 			
 			if find_room:
-				find_room.remove_player(exited_client, find_room.room_config.get_or_add(RoomState.RoomConfigs.BYE, null))
+				if find_room.room_owner == exited_client:
+					find_room.remove_players(DefaultReasons.ROOM_OWNER_LEFT, true)
+				else:
+					find_room.remove_player(exited_client, find_room.room_config.get_or_add(RoomState.RoomConfigs.BYE, null))
 			else:
 				return
 		else:
@@ -410,3 +438,27 @@ func _rpc_set_room_config(config : RoomState.RoomConfigs, value : Variant) -> vo
 				if find_room.room_owner == client_owner:
 					if config is RoomState.RoomConfigs:
 						find_room.room_config[config] = value
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_set_room_closed(closed : bool) -> void:
+	if not multiplayer.is_server():
+		return
+	
+	var client_owner := multiplayer.get_remote_sender_id()
+	var find_proxy := HumbleNetAuthService.get_proxy_auth(client_owner)
+	
+	if find_proxy:
+		if find_proxy.proxy_is_in_room:
+			var find_room := get_room(find_proxy.proxy_in_room_code)
+			
+			if find_room:
+				if find_room.room_owner == client_owner:
+					find_room.room_closed = closed
+				else:
+					return
+			else:
+				return
+		else:
+			return
+	else:
+		return

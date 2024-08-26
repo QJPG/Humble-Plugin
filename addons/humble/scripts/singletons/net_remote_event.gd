@@ -56,6 +56,9 @@ func revoke_authority(peer : int) -> void:
 func set_room_config(config : HumbleNetManager.RoomState.RoomConfigs, value : Variant) -> void:
 	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_set_room_config", [config, value])
 
+func set_room_closed(closed : bool) -> void:
+	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_set_room_closed", [closed])
+
 @rpc("authority", "call_remote", "reliable")
 func _rpc_room_created(code : String) -> void:
 	if room_created_callback:
