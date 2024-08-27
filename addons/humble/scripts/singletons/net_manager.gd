@@ -128,16 +128,16 @@ class RoomState extends RefCounted:
 			remove_player(id, reason, _notify)
 			_index += 1
 	
-	func send_event(data : Variant, targets := PackedInt32Array([])) -> void:
+	func send_event(peer : int, data : Variant, targets := PackedInt32Array([])) -> void:
 		if targets.size() > 0:
 			for i in targets.size():
 				if room_players.has(targets[i]):
 					HumbleNetManagerService.get_multiplayer_ext().rpc(
-						targets[i], HumbleNetRemoteEventService, "_rpc_room_event", [data])
+						targets[i], HumbleNetRemoteEventService, "_rpc_room_event", [peer, data])
 		else:
 			for i in room_players.size():
 				HumbleNetManagerService.get_multiplayer_ext().rpc(
-					room_players[i], HumbleNetRemoteEventService, "_rpc_room_event", [data])
+					room_players[i], HumbleNetRemoteEventService, "_rpc_room_event", [peer, data])
 
 var rooms : Array[RoomState]
 
@@ -179,7 +179,7 @@ func network_listen_connections(port : int, max_connections := 4095, max_channel
 						
 						if find_room:
 							if find_room.room_owner == peer:
-								find_room.remove_players(null, false)
+								find_room.remove_players(DefaultReasons.ROOM_OWNER_LEFT, false)
 							else:
 								find_room.remove_player(peer, null, false)
 				
@@ -307,7 +307,7 @@ func _rpc_join_room(code : String) -> void:
 	var find_proxy := HumbleNetAuthService.get_proxy_auth(joinned_client)
 	
 	var connected_success := false
-	var join_error : HumbleNetRemoteEvent.JoinErrors
+	var join_error : HumbleNetRemoteEvent.ConnectionErrors
 	
 	if find_proxy:
 		if find_proxy.proxy_is_in_room == false:
@@ -316,16 +316,16 @@ func _rpc_join_room(code : String) -> void:
 			if find_room:
 				if find_room.room_closed == false:
 					if find_room.room_players.size() >= find_room.room_max_players:
-						join_error = HumbleNetRemoteEvent.JoinErrors.IS_FULL
+						join_error = HumbleNetRemoteEvent.ConnectionErrors.IS_FULL
 					else:
 						find_room.add_player(joinned_client)
 						connected_success = true
 				else:
-					join_error = HumbleNetRemoteEvent.JoinErrors.REFUSED
+					join_error = HumbleNetRemoteEvent.ConnectionErrors.REFUSED
 			else:
-				join_error = HumbleNetRemoteEvent.JoinErrors.NOT_FOUND
+				join_error = HumbleNetRemoteEvent.ConnectionErrors.NOT_FOUND
 		else:
-			join_error = HumbleNetRemoteEvent.JoinErrors.IS_IN_OTHER_ROOM
+			join_error = HumbleNetRemoteEvent.ConnectionErrors.IS_IN_OTHER_ROOM
 	
 		if connected_success == false:
 			multiplayer.rpc(joinned_client, HumbleNetRemoteEventService, "_rpc_join_room_error", [join_error])
@@ -393,7 +393,7 @@ func _rpc_send_room(data : Variant, targets := PackedInt32Array([])) -> void:
 			
 			if find_room:
 				if find_room.room_owner == client_owner or find_room.room_player_authorities.has(client_owner):
-					find_room.send_event(data, targets)
+					find_room.send_event(client_owner, data, targets)
 				else:
 					return
 			else:
