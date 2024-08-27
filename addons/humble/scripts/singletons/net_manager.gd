@@ -7,6 +7,33 @@ enum DefaultReasons {
 	ROOM_OWNER_LEFT,
 }
 
+class RoomNetNodeRemoteProperty extends RefCounted:
+	var property_mode : HumbleNetRemoteEvent.NodeRemoteUpdatePropertyModes
+	var property_name : String
+	var property_value : Variant
+	var property_changed : bool
+
+class RoomNetNodeRemote extends RefCounted:
+	var node_owner : int
+	var node_allowed_peers_visibility : PackedInt32Array
+	var node_properties : Array[RoomNetNodeRemoteProperty]
+	var node_alias : StringName
+	var node_path : NodePath
+	var _removed : bool
+	
+	func get_or_add_property(property_name : String, mode : HumbleNetRemoteEvent.NodeRemoteUpdatePropertyModes) -> RoomNetNodeRemoteProperty:
+		for i in node_properties.size():
+			if node_properties[i].property_name == property_name and node_properties[i].property_mode == mode:
+				return node_properties[i]
+		
+		var new_property := RoomNetNodeRemoteProperty.new()
+		new_property.property_name = property_name
+		new_property.property_mode = mode
+		
+		node_properties.append(new_property)
+		
+		return new_property
+
 class RoomState extends RefCounted:
 	enum RoomConfigs {
 		HELLO,		#SEND TO NEW PEER
@@ -23,6 +50,7 @@ class RoomState extends RefCounted:
 	var room_max_players : int
 	var room_player_authorities : PackedInt32Array
 	var room_closed : bool
+	var room_node_remotes : Array[RoomNetNodeRemote]
 	
 	func generate_unique_room_code(length := 4) -> void:
 		var _chars := "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -138,6 +166,63 @@ class RoomState extends RefCounted:
 			for i in room_players.size():
 				HumbleNetManagerService.get_multiplayer_ext().rpc(
 					room_players[i], HumbleNetRemoteEventService, "_rpc_room_event", [peer, data])
+	
+	func get_node_remote(alias : StringName) -> RoomNetNodeRemote:
+		for i in room_node_remotes.size():
+			if room_node_remotes[i].node_alias == alias:
+				return room_node_remotes[i]
+		return null
+	
+	func sync_nodes() -> void:
+		var _index := 0
+		var _length := room_node_remotes.size()
+		
+		while _index < _length:
+			var node := room_node_remotes[_index]
+			
+			if node._removed:
+				room_node_remotes.erase(node)
+				
+				_index += 1
+				return
+			else:
+				#region network
+				for i in node.node_allowed_peers_visibility.size():
+					var peer := node.node_allowed_peers_visibility[i]
+					
+					if not room_players.has(peer):
+						node.node_allowed_peers_visibility.remove_at(i)
+						
+						if peer == node.node_owner:
+							node._removed = true
+						
+							for j in node.node_allowed_peers_visibility.size():
+								HumbleNetManagerService.multiplayer.rpc(
+									node.node_allowed_peers_visibility[j],
+									HumbleNetRemoteEventService, "_rpc_room_node_remote_despawned", [
+										node.node_path,
+										node.node_alias,
+									])
+						
+						return
+					
+					if peer == node.node_owner:
+						continue
+					
+					for _node_property_ in node.node_properties:
+						match _node_property_.property_mode:
+							HumbleNetRemoteEvent.NodeRemoteUpdatePropertyModes.UPDATE_ALWAYS:
+								HumbleNetManagerService.multiplayer.rpc(peer, HumbleNetRemoteEventService, "_rpc_node_remote_sync_always", [
+									node.node_alias, _node_property_.property_name, _node_property_.property_value
+								])
+							
+							HumbleNetRemoteEvent.NodeRemoteUpdatePropertyModes.UPDATE_ALWAYS_UNSEQUENCED:
+								HumbleNetManagerService.multiplayer.rpc(peer, HumbleNetRemoteEventService, "_rpc_node_remote_sync_always_unsequenced", [
+									node.node_alias, _node_property_.property_name, _node_property_.property_value
+								])
+				#endregion
+			
+			_index += 1
 
 var rooms : Array[RoomState]
 
@@ -192,43 +277,40 @@ func _enter_tree() -> void:
 func _exit_tree() -> void:
 	multiplayer.multiplayer_peer = null
 
-var _poll_delta := 0.0
-
 func _process(delta: float) -> void:
 	if not get_multiplayer_ext():
 		return
 	
-	if _poll_delta < 1000.0:
-		var _index := 0
-		var _rooms_count := rooms.size()
-		
-		while _index < _rooms_count:
-			var room := rooms[0]
-			
-			if room.room_players.size() < 1:
-				if room.room_timer == null:
-					if get_multiplayer_ext().is_debug_enabled():
-						printerr("Start room timeout to destroy.")
-					
-					room.room_timer = get_tree().create_timer(5.0)
-					room.room_timer.timeout.connect(
-						func() -> void:
-							if room.room_players.size() < 1:
-								var code := room.room_code
-								rooms.erase(room)
-								
-								if get_multiplayer_ext().is_debug_enabled():
-									printerr("Room (%s) was erased by limbo state." % code)
-							else:
-								room.room_timer = null
-					)
-			_index += 1
-		
-		_poll_delta += 5000.0
-	else:
-		_poll_delta -= 60.0
+	var _index := 0
+	var _rooms_count := rooms.size()
 	
-	
+	while _index < _rooms_count:
+		var room := rooms[0]
+		
+		if room.room_players.size() < 1:
+			if room.room_timer == null:
+				if get_multiplayer_ext().is_debug_enabled():
+					printerr("Started Room Timeout.")
+				
+				room.room_timer = get_tree().create_timer(5.0)
+				room.room_timer.timeout.connect(
+					func() -> void:
+						if room.room_players.size() < 1:
+							var code := room.room_code
+							rooms.erase(room)
+							
+							if get_multiplayer_ext().is_debug_enabled():
+								printerr("Room (%s) was erased by limbo state." % code)
+						else:
+							printerr("Room Timeout Canceled.")
+							room.room_timer = null
+				)
+			else:
+				pass
+		else:
+			room.sync_nodes()
+		
+		_index += 1
 
 func get_room(code : String) -> RoomState:
 	for i in rooms.size():
@@ -454,6 +536,186 @@ func _rpc_set_room_closed(closed : bool) -> void:
 			if find_room:
 				if find_room.room_owner == client_owner:
 					find_room.room_closed = closed
+				else:
+					return
+			else:
+				return
+		else:
+			return
+	else:
+		return
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_add_room_node_remote(node_path : NodePath, alias : StringName, peer : int, settings : Dictionary) -> void:
+	if not multiplayer.is_server():
+		return
+	
+	if node_path.is_empty() or alias.is_empty() or settings.size() < 1:
+		return
+	
+	for property in settings:
+		if property is not String:
+			return
+		
+		if settings[property] is not HumbleNetRemoteEvent.NodeRemoteUpdatePropertyModes:
+			return
+	
+	var client_owner := multiplayer.get_remote_sender_id()
+	var find_proxy := HumbleNetAuthService.get_proxy_auth(client_owner)
+	
+	if find_proxy:
+		if find_proxy.proxy_is_in_room:
+			var find_room := get_room(find_proxy.proxy_in_room_code)
+			
+			if find_room:
+				if find_room.room_owner == client_owner:
+					var find_node := find_room.get_node_remote(alias)
+					
+					if find_node:
+						return
+					else:
+						if find_room.room_players.has(peer):
+							var node := RoomNetNodeRemote.new()
+							node.node_alias = alias
+							node.node_owner = peer
+							node.node_path = node_path
+							
+							for property_name in settings:
+								var property := RoomNetNodeRemoteProperty.new()
+								property.property_mode = settings[property_name]
+								property.property_name = property_name
+								
+								node.node_properties.append(property)
+							
+							find_room.room_node_remotes.append(node)
+							
+							print('Submitted a node remote to room: %s. Node Alias: %s' % [find_room.room_code, alias])
+						else:
+							return
+				else:
+					return
+			else:
+				return
+		else:
+			return
+	else:
+		return
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_remove_room_node_remote(alias : StringName) -> void:
+	if not multiplayer.is_server():
+		return
+	
+	var client_owner := multiplayer.get_remote_sender_id()
+	var find_proxy := HumbleNetAuthService.get_proxy_auth(client_owner)
+	
+	if find_proxy:
+		if find_proxy.proxy_is_in_room:
+			var find_room := get_room(find_proxy.proxy_in_room_code)
+			
+			if find_room:
+				if find_room.room_owner == client_owner:
+					var find_node := find_room.get_node_remote(alias)
+					
+					if find_node:
+						find_node._removed = true
+						
+						for i in find_node.node_allowed_peers_visibility.size():
+							multiplayer.rpc(find_node.node_allowed_peers_visibility[i], HumbleNetRemoteEventService, "_rpc_room_node_remote_despawned", [
+								find_node.node_path,
+								find_node.node_alias,
+							])
+						
+						print("Removed a node remote from room: %s. Node Alias: %s" % [find_room.room_code, alias])
+					else:
+						return
+				else:
+					return
+			else:
+				return
+		else:
+			return
+	else:
+		return
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_update_room_node_remote_property(alias : String, property : String, value : Variant) -> void:
+	if not multiplayer.is_server():
+		return
+	
+	var client_owner := multiplayer.get_remote_sender_id()
+	var find_proxy := HumbleNetAuthService.get_proxy_auth(client_owner)
+	
+	if find_proxy:
+		if find_proxy.proxy_is_in_room:
+			var find_room := get_room(find_proxy.proxy_in_room_code)
+			
+			if find_room:
+				var find_node := find_room.get_node_remote(alias)
+				
+				if find_node and find_node.node_owner == client_owner:
+					for property_object in find_node.node_properties:
+						if property_object.property_name == property:
+							property_object.property_value = value
+							
+							"""
+							if get_multiplayer_ext().is_debug_enabled():
+								print("[NODE_REMOTE] NODE(%s) PROPERTY -> %s: %s" % [
+									find_node.node_alias,
+									property_object.property_name,
+									property_object.property_value
+								])
+							"""
+							return
+				else:
+					return
+			else:
+				return
+		else:
+			return
+	else:
+		return
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_set_room_node_remote_visibility(peers : PackedInt32Array, alias : StringName, allowed : bool) -> void:
+	if not multiplayer.is_server():
+		return
+	
+	var client_owner := multiplayer.get_remote_sender_id()
+	var find_proxy := HumbleNetAuthService.get_proxy_auth(client_owner)
+	
+	if find_proxy:
+		if find_proxy.proxy_is_in_room:
+			var find_room := get_room(find_proxy.proxy_in_room_code)
+			
+			if find_room:
+				if find_room.room_owner == client_owner:
+					var find_node := find_room.get_node_remote(alias)
+					
+					if find_node:
+						for i in peers.size():
+							if allowed == false:
+								if find_node.node_allowed_peers_visibility.has(peers[i]):
+									find_node.node_allowed_peers_visibility.remove_at(find_node.node_allowed_peers_visibility.find(peers[i]))
+									
+									multiplayer.rpc(peers[i], HumbleNetRemoteEventService, "_rpc_room_node_remote_despawned", [
+										find_node.node_path,
+										find_node.node_alias,
+									])
+								
+							else:
+								if not find_node.node_allowed_peers_visibility.has(peers[i]):
+									find_node.node_allowed_peers_visibility.append(peers[i])
+									
+									multiplayer.rpc(peers[i], HumbleNetRemoteEventService, "_rpc_room_node_remote_spawned", [
+										find_node.node_path,
+										find_node.node_alias,
+										find_node.node_owner
+									])
+								
+					else:
+						return
 				else:
 					return
 			else:

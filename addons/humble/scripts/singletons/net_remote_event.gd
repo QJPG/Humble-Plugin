@@ -9,6 +9,11 @@ enum ConnectionErrors {
 	NOT_FOUND,
 }
 
+enum NodeRemoteUpdatePropertyModes {
+	UPDATE_ALWAYS,
+	UPDATE_ALWAYS_UNSEQUENCED,
+}
+
 signal room_entered				(data : Variant)
 signal room_exited				(data : Variant)
 signal room_player_entered		(peer : int, data : Variant)
@@ -16,8 +21,11 @@ signal room_player_exited		(peer : int, data : Variant)
 signal room_connection_error	(reason : ConnectionErrors)
 signal room_authority_changed	(has_authority : int)
 signal room_created				(code : String)
+signal room_node_remote_spawned(node_path : NodePath, alias : StringName, is_authority : bool)
+signal room_node_remote_despawned(node_path : NodePath, alias : StringName)
 
 var can_accumulate := true
+var spawn_nodes : Dictionary
 
 var room_created_callback : Callable
 var room_event_callback : Callable : set = _set_room_event_callback
@@ -46,6 +54,12 @@ func _exit_tree() -> void:
 	multiplayer.multiplayer_peer = null
 
 func connect_to_server(address : String, port : int) -> void:
+	room_event_callback = Callable()
+	
+	spawn_nodes.clear()
+	
+	_accumulated_event_callback.clear()
+	
 	var enet_network := ENetMultiplayerPeer.new()
 	enet_network.create_client(address, port)
 	multiplayer.multiplayer_peer = enet_network
@@ -65,20 +79,30 @@ func remove_room(data : Variant = null) -> void:
 func kick_player(peer : int, data : Variant = null) -> void:
 	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_kick_player", [peer, data])
 
-func send_room(data : Variant, target := PackedInt32Array([])) -> void:
-	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_send_room", [data, target])
+func send_room(data : Variant, targets := PackedInt32Array([])) -> void:
+	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_send_room", [data, targets])
 
-func add_authority(peer : int) -> void:
-	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_set_player_authority", [peer, true])
-
-func revoke_authority(peer : int) -> void:
-	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_set_player_authority", [peer, false])
+func set_room_authority(peer : int, enabled : bool) -> void:
+	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_set_player_authority", [peer, enabled])
 
 func set_room_config(config : HumbleNetManager.RoomState.RoomConfigs, value : Variant) -> void:
 	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_set_room_config", [config, value])
 
 func set_room_closed(closed : bool) -> void:
 	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_set_room_closed", [closed])
+
+func add_room_node_remote(node_path : NodePath, alias : StringName, peer : int, settings : Dictionary) -> void:
+	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_add_room_node_remote", [node_path, alias, peer, settings])
+
+#set node async settings visibility for peers and notify theys
+func set_room_node_remote_visibility(peers : PackedInt32Array, alias : StringName, allowed : bool) -> void:
+	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_set_room_node_remote_visibility", [peers, alias, allowed])
+
+func remove_room_node_remote(alias : StringName) -> void:
+	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_remove_room_node_remote", [alias])
+
+func update_room_node_remote_property(alias : String, property : String, value : Variant) -> void:
+	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_update_room_node_remote_property", [alias, property, value])
 
 @rpc("authority", "call_remote", "reliable")
 func _rpc_room_created(code : String) -> void:
@@ -136,3 +160,23 @@ func _rpc_join_room_error(reason : ConnectionErrors) -> void:
 	
 	if room_joinned_room_error_callback:
 		room_joinned_room_error_callback.call(reason)
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_room_node_remote_spawned(node_path : NodePath, alias : StringName, authority : int) -> void:
+	room_node_remote_spawned.emit(node_path, alias, authority==multiplayer.get_unique_id())
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_room_node_remote_despawned(node_path : NodePath, alias : StringName) -> void:
+	room_node_remote_despawned.emit(node_path, alias)
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func _rpc_node_remote_sync_always(alias : StringName, property : String, value : Variant) -> void:
+	if spawn_nodes.has(String(alias)):
+		if spawn_nodes[String(alias)] is Node and property in (spawn_nodes[String(alias)] as Node):
+			(spawn_nodes[String(alias)] as Node).set(property, value)
+
+@rpc("authority", "call_remote", "unreliable")
+func _rpc_node_remote_sync_always_unsequenced(alias : StringName, property : String, value : Variant) -> void:
+	if spawn_nodes.has(alias):
+		if spawn_nodes[alias] is Node and (spawn_nodes[alias] as Node).get_property_list().has(property):
+			(spawn_nodes[alias] as Node).set(property, value)

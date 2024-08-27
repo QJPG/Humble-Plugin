@@ -108,10 +108,8 @@ func _poll() -> Error:
 	return _base_api.poll()
 
 func _rpc(peer: int, object: Object, method: StringName, args: Array) -> Error:
-	if is_debug_enabled():
-		print_debug("[RPC::] @%s -> %s:%s" % [
-			peer, object, method
-		])
+	if not peer in _base_api.get_peers():
+		printerr("PEER IS UNKNOWN: %s" % peer)
 	
 	return _base_api.rpc(peer, object, method, args)
 
