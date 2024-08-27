@@ -4,6 +4,132 @@
 # Humble-Plugin
 High level Networking Plugin for Godot.
 
+Humble allows the server to create and manage rooms for separate game sessions. For each room, Humble allows the creation of "Remote Nodes" that store and synchronize information for all players in the same room.
+
+## Hello, Humble!
+
+### Starting the Server and Client!
+```gdscript
+extends Button
+
+func _pressed() -> void:
+	Application.is_host = true
+
+	#STARTING SERVER
+	HumbleNetManagerService.network_listen_connections(22023)
+
+	#STARTING CLIENT
+	HumbleNetRemoteEventService.connect_to_server("127.0.0.1", 22023)
+	
+	await HumbleNetRemoteEventService.multiplayer.connected_to_server
+	
+	HumbleNetRemoteEventService.create_room(false, 5, {
+		HumbleNetManager.RoomState.RoomConfigs.HELLO: "This is a private hello data.",
+		HumbleNetManager.RoomState.RoomConfigs.BYE: "This is a public 'Adios' data.",
+		HumbleNetManager.RoomState.RoomConfigs.JOINNED: "This is a public hello data.",
+	})
+	HumbleNetRemoteEventService.room_created.connect(func(code : String) -> void:
+		print(code)
+		HumbleNetRemoteEventService.join_room(code))
+	
+	HumbleNetRemoteEventService.room_entered.connect(func(data : Variant) -> void:
+		get_tree().change_scene_to_file("res://assets/scenes/main_game.tscn"))
+
+```
+
+### Starting Game Manager!
+
+```gdscript
+extends Node
+
+class_name GameManager
+
+var players : Array[int]
+
+func create_player_controller(alias : StringName, is_local : bool) -> CharacterBody2D:
+	var player := preload("res://assets/scenes/player_controller.tscn").instantiate()
+	player.name = alias
+	player.is_local = is_local
+	
+	HumbleNetRemoteEventService.spawn_nodes[alias] = player
+	
+	add_child(player)
+	
+	return player
+
+func remove_player_controller(alias : StringName) -> void:
+	if HumbleNetRemoteEventService.spawn_nodes.has(alias):
+		HumbleNetRemoteEventService.spawn_nodes[alias].queue_free()
+		HumbleNetRemoteEventService.spawn_nodes.erase(alias)
+
+func _player_entered(peer : int, data : Variant) -> void:
+	players.append(peer)
+
+func _player_exited(peer : int, data : Variant) -> void:
+	players.erase(peer)
+
+func _authority_changed(has_authority : bool) -> void:
+	print("You has authority? %s" % has_authority)
+
+func _exited(data : Variant) -> void:
+	print("Exited from room: Reason: %s" % data)
+	get_tree().change_scene_to_file("res://assets/scenes/main_menu.tscn")
+
+func _node_spawned(node_path : NodePath, alias : StringName, is_local : bool) -> void:
+	create_player_controller(alias, is_local)
+	
+	print('Spawned node: %s %s is local: %s' % [node_path, alias, is_local])
+
+func _node_despawned(node_path : NodePath, alias : StringName) -> void:
+	remove_player_controller(alias)
+	
+	print('Despawned node: %s %s' % [node_path, alias])
+
+#ONLY ROOM OWNER
+func start() -> void:
+	var all_players := Array([multiplayer.get_unique_id()])
+	all_players.append_array(players)
+	
+	for i in all_players.size():
+		HumbleNetRemoteEventService.add_room_node_remote(
+			get_path(),		#ROOT PATH FROM NODE (Replace with NodePath("") if you don't need it.)
+			str(all_players[i]),	#AN ALIAS FOR THE NODE
+			all_players[i],		#PLAYER WHO HAS AUTHORITY OVER THE NODE
+			{
+				"position": HumbleNetRemoteEvent.NodeRemoteUpdatePropertyModes.UPDATE_ALWAYS	#PROPERTY TO SYNC.
+			}
+		)
+
+		#Enter which players will receive updates about this Node. (You don't need to add the authoritative player here.)
+		HumbleNetRemoteEventService.set_room_node_remote_visibility(all_players, str(all_players[i]), true)
+
+func _enter_tree() -> void:
+	get_parent().get_node("Quit").button_down.connect(func(): HumbleNetRemoteEventService.exit_room())
+	get_parent().get_node("Start").button_down.connect(func(): start())
+	
+	HumbleNetRemoteEventService.room_exited.connect(_exited)
+	HumbleNetRemoteEventService.room_authority_changed.connect(_authority_changed)
+	HumbleNetRemoteEventService.room_player_entered.connect(_player_entered)
+	HumbleNetRemoteEventService.room_player_exited.connect(_player_exited)
+	HumbleNetRemoteEventService.room_node_remote_spawned.connect(_node_spawned)
+	HumbleNetRemoteEventService.room_node_remote_despawned.connect(_node_despawned)
+	
+	HumbleNetRemoteEventService.multiplayer.server_disconnected.connect(func(): get_tree().change_scene_to_file("res://assets/scenes/main_menu.tscn"))
+
+func _exit_tree() -> void:
+	return
+
+func _ready() -> void:
+	return
+
+func _physics_process(delta: float) -> void:
+	return
+
+func _process(delta: float) -> void:
+	get_parent().get_node("Start").visible = Application.is_host
+
+```
+
 ## Basic Usage
 "Humble" works with the room system where each room has a single owner to manage it.
 Rooms can be created by any user (peer) on the network. Here's how:
@@ -33,11 +159,8 @@ func kick_player(peer : int, data : Variant = null) -> void:
 #Sends an event to all or some players. (only owner or authorities)
 func send_room(data : Variant, target := PackedInt32Array([])) -> void:
 
-#Add a player to room authorities. (only owner)
-func add_authority(peer : int) -> void:
-
-#Remove a player authority from room. (only owner)
-func revoke_authority(peer : int) -> void:
+#Enables a player as room authority. (only owner) (default is false)
+func set_room_authority(peer : int, enabled : bool) -> void:
 
 
 ```
