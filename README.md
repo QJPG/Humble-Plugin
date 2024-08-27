@@ -29,7 +29,6 @@ func _pressed() -> void:
 		HumbleNetManager.RoomState.RoomConfigs.JOINNED: "This is a public hello data.",
 	})
 	HumbleNetRemoteEventService.room_created.connect(func(code : String) -> void:
-		print(code)
 		HumbleNetRemoteEventService.join_room(code))
 	
 	HumbleNetRemoteEventService.room_entered.connect(func(data : Variant) -> void:
