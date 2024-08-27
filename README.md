@@ -55,4 +55,14 @@ It is also possible to change these settings even after the room has been create
 ```gdscript
 HumbleNetRemoteEventService.set_room_config(HumbleNetManager.RoomState.RoomConfigs.BYE, "A player just left the game!")
 ```
+Communication in a room is done by events. These events are calls (in "reliable" transfer mode) that are transmitted only by the room owner or authorities.
+```gdscript
+HumbleNetRemoteEventService.room_event_callback = func(peer : int, data):
+	prints('Event by: %s -> %s' % [peer, data])
+```
+### If the player has already entered the room, but has not yet defined the "callback" for the events, they will be accumulated by default, so that when the callback is defined, these missed events will be passed on.
 
+To disable this accumulation do this:
+```gdscript
+HumbleNetRemoteEventService.can_accumulate = false
+```
