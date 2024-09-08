@@ -188,3 +188,37 @@ To disable this accumulation do this:
 ```gdscript
 HumbleNetRemoteEventService.can_accumulate = false
 ```
+### To sync nodes to a specific room, you can utilize some "Remote Node" control functions!
+
+```gdscript
+HumbleNetRemoteEventService.add_room_node_remote(node.get_path(), "Node Alias", multiplayer.get_unique_id(), {})
+```
+This function allows you to register a node of any type in the room. The first argument informs the path of the node (can be empty). The second argument provides a unique name for this node in the room. The third argument defines the id of the player in the room who will have authority over this node.
+The last argument defines which properties can be updated and how they are updated.
+```gdscript
+#Example:
+{
+	"position": HumbleNetRemoteEvent.NodeRemoteUpdatePropertyModes.UPDATE_ALWAYS
+}
+```
+
+Now that the Node has been registered in the room, it is necessary to inform which players will receive updates about this node:
+```gdscript
+HumbleNetRemoteEventService.set_room_node_remote_visibility(<PackedInt32Array: Players ID's in room>, <String: Node Alias>, <true/false>)
+```
+(There is no need to provide the authoritative player id here.)
+
+In order for everyone to receive updates from the Node, it is necessary to instantiate the Node of the same type manually.
+```gdscript
+HumbleNetRemoteEventService.spawn_nodes[<String: Node Alias>] = instanced_node
+```
+
+To update a Node property, the authoritative player on the node must call this function:
+```gdscript
+HumbleNetRemoteEventService.update_room_node_remote_property(alias : String, property : String, value : Variant)
+```
+
+To remove the node from the room, the host must call this function:
+```gdscript
+HumbleNetRemoteEventService.remove_room_node_remote(alias : StringName)
+```
