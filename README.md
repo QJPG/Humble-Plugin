@@ -222,3 +222,11 @@ To remove the node from the room, the host must call this function:
 ```gdscript
 HumbleNetRemoteEventService.remove_room_node_remote(alias : StringName)
 ```
+
+### The match maker is still under development. However, it is possible to simplify the room search process using the following method:
+```gdscript
+HumbleNetRemoteEventService.update_available_rooms()
+	
+var list_of_public_rooms = await HumbleNetRemoteEventService.available_room_list
+
+```
