@@ -678,6 +678,26 @@ func _rpc_update_room_node_remote_property(alias : String, property : String, va
 		return
 
 @rpc("any_peer", "call_remote", "reliable")
+func _rpc_get_available_rooms() -> void:
+	if not multiplayer.is_server():
+		return
+	
+	var peer := multiplayer.get_remote_sender_id()
+	
+	var all_rooms := {}
+	
+	for i in rooms.size():
+		if rooms[i].room_is_private == false and rooms[i].room_closed == false:
+			all_rooms[rooms[i].room_code] = {
+				"CurrentPlayers": rooms[i].room_players.size(),
+				"MaxPlayers": rooms[i].room_max_players,
+			}
+	
+	multiplayer.rpc(peer, HumbleNetRemoteEventService, "_rpc_update_available_rooms", [all_rooms])
+	
+	return
+
+@rpc("any_peer", "call_remote", "reliable")
 func _rpc_set_room_node_remote_visibility(peers : PackedInt32Array, alias : StringName, allowed : bool) -> void:
 	if not multiplayer.is_server():
 		return

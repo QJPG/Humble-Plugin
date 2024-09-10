@@ -24,6 +24,8 @@ signal room_created				(code : String)
 signal room_node_remote_spawned(node_path : NodePath, alias : StringName, is_authority : bool)
 signal room_node_remote_despawned(node_path : NodePath, alias : StringName)
 
+signal available_room_list		(list : Dictionary)
+
 var can_accumulate := true
 var spawn_nodes : Dictionary
 
@@ -104,6 +106,9 @@ func remove_room_node_remote(alias : StringName) -> void:
 func update_room_node_remote_property(alias : String, property : String, value : Variant) -> void:
 	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_update_room_node_remote_property", [alias, property, value])
 
+func update_available_rooms() -> void:
+	multiplayer.rpc(1, HumbleNetManagerService, "_rpc_get_available_rooms", [])
+
 @rpc("authority", "call_remote", "reliable")
 func _rpc_room_created(code : String) -> void:
 	room_created.emit(code)
@@ -173,10 +178,15 @@ func _rpc_room_node_remote_despawned(node_path : NodePath, alias : StringName) -
 func _rpc_node_remote_sync_always(alias : StringName, property : String, value : Variant) -> void:
 	if spawn_nodes.has(String(alias)):
 		if spawn_nodes[String(alias)] is Node and property in (spawn_nodes[String(alias)] as Node):
-			(spawn_nodes[String(alias)] as Node).set(property, value)
+			if (spawn_nodes[String(alias)] as Node).is_inside_tree():
+				(spawn_nodes[String(alias)] as Node).set(property, value)
 
 @rpc("authority", "call_remote", "unreliable")
 func _rpc_node_remote_sync_always_unsequenced(alias : StringName, property : String, value : Variant) -> void:
 	if spawn_nodes.has(alias):
 		if spawn_nodes[alias] is Node and (spawn_nodes[alias] as Node).get_property_list().has(property):
 			(spawn_nodes[alias] as Node).set(property, value)
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_update_available_rooms(list : Dictionary) -> void:
+	available_room_list.emit(list)
