@@ -1,5 +1,6 @@
+![image](https://github.com/user-attachments/assets/3489aa58-40e6-471b-b8e6-6cf13593a80a)
 
-![icon](https://github.com/user-attachments/assets/0caf6d11-d4a5-4c33-b479-e32620ea48d5)
+
 
 # Humble-Plugin
 High level Networking Plugin for Godot.
@@ -8,6 +9,9 @@ Humble allows the server to create and manage rooms for separate game sessions. 
 
 
 # Version 2.0 is here and you can find out about the changes by visiting the plugin [wiki](https://github.com/QJPG/Humble-Plugin/wiki)
+![icon](https://github.com/user-attachments/assets/0caf6d11-d4a5-4c33-b479-e32620ea48d5)
+
+
 
 # Version 1.0
 ## Hello, Humble!
