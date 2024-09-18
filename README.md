@@ -6,6 +6,10 @@ High level Networking Plugin for Godot.
 
 Humble allows the server to create and manage rooms for separate game sessions. For each room, Humble allows the creation of "Remote Nodes" that store and synchronize information for all players in the same room.
 
+
+# Version 2.0 is here and you can find out about the changes by visiting the plugin [wiki](https://github.com/QJPG/Humble-Plugin/wiki)
+
+# Version 1.0
 ## Hello, Humble!
 
 ### Starting the Server and Client!
